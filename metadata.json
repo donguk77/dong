@@ -1,0 +1,5 @@
+{
+  "name": "PDF to AI-Ready Data Converter",
+  "description": "Upload PDF documents to extract text and tables into a structured JSON format optimized for ingestion by other AI models.",
+  "requestFramePermissions": []
+}
