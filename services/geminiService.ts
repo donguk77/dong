@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { AIReadyData } from "../types";
 
+// 파일을 Gemini가 이해할 수 있는 형식으로 변환하는 함수
 const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -17,6 +18,9 @@ const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: s
     reader.readAsDataURL(file);
   });
 };
+
+// 잠시 대기하는 유틸리티 함수
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const processPdfForAI = async (file: File): Promise<AIReadyData> => {
   const apiKey = process.env.API_KEY;
@@ -82,27 +86,52 @@ export const processPdfForAI = async (file: File): Promise<AIReadyData> => {
     required: ["metadata", "documentAnalysis", "structuredContent"],
   };
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: {
-        role: "user",
-        parts: [filePart, { text: prompt }]
-      },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
-      },
-    });
+  // 재시도 관련 설정
+  const MAX_RETRIES = 3;
+  let retryCount = 0;
 
-    if (!response.text) throw new Error("Gemini로부터 응답을 받지 못했습니다.");
-    
-    const data = JSON.parse(response.text) as AIReadyData;
-    data.metadata.filename = file.name;
-    data.metadata.processedAt = new Date().toISOString();
-    return data;
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    throw error;
+  while (retryCount <= MAX_RETRIES) {
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          role: "user",
+          parts: [filePart, { text: prompt }]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: responseSchema,
+        },
+      });
+
+      if (!response.text) throw new Error("Gemini로부터 응답을 받지 못했습니다.");
+      
+      const data = JSON.parse(response.text) as AIReadyData;
+      data.metadata.filename = file.name;
+      data.metadata.processedAt = new Date().toISOString();
+      return data;
+
+    } catch (error: any) {
+      const isOverloaded = error?.message?.includes("503") || error?.message?.includes("overloaded");
+      
+      if (isOverloaded && retryCount < MAX_RETRIES) {
+        retryCount++;
+        // 지수 백오프: 1초, 2초, 4초 대기
+        const waitTime = Math.pow(2, retryCount - 1) * 1000;
+        console.warn(`서버가 바쁩니다. ${waitTime/1000}초 후 다시 시도합니다... (${retryCount}/${MAX_RETRIES})`);
+        await sleep(waitTime);
+        continue;
+      }
+
+      // 재시도 끝에 실패하거나 다른 에러인 경우
+      if (isOverloaded) {
+        throw new Error("현재 구글 AI 서버에 사용자가 너무 많아 처리가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
+      }
+      
+      console.error("Gemini API Error:", error);
+      throw error;
+    }
   }
+  
+  throw new Error("문서 처리 중 알 수 없는 오류가 발생했습니다.");
 };
