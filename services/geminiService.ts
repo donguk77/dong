@@ -1,8 +1,6 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { AIReadyData } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -21,6 +19,10 @@ const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: s
 };
 
 export const processPdfForAI = async (file: File): Promise<AIReadyData> => {
+  // Initialize AI client lazily inside the function.
+  // This prevents the application from crashing at startup (White Screen) if process.env.API_KEY is undefined.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
   const filePart = await fileToGenerativePart(file);
 
   const prompt = `
